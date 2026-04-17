@@ -1,0 +1,48 @@
+name: forecast
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      force_shift:
+        description: "Force a shift (day|night) for manual runs"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forecast-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Fetch forecast
+        env:
+          FORCE_SHIFT: ${{ github.event.inputs.force_shift }}
+        run: python fetch.py
+
+      - name: Commit updated CSV
+        run: |
+          if git diff --quiet data/forecast.csv; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/forecast.csv
+          git commit -m "forecast: append run $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git push
