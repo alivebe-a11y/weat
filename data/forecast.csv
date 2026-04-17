@@ -1,1 +1,2 @@
 run_utc,location,lat,lon,shift,shift_start_local,shift_end_local,rain_ukmo_mm,rain_ecmwf_mm,rain_gfs_mm,rain_blend_mm,rain_spread_mm,rain_confidence,gust_ukmo_mph,gust_ecmwf_mph,gust_gfs_mph,gust_blend_mph,gust_spread_mph,gust_confidence
+2026-04-17T15:37:06Z,Holbury,53.8297,-1.3818,night,2026-04-17T17:00+01:00,2026-04-18T05:00+01:00,0.0,0.0,0.1,0.02,0.1,High,23.3,22.8,26.4,23.8,3.6,Medium
