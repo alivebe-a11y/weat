@@ -18,9 +18,16 @@ GUST_WEIGHTS = {
     "gfs_seamless": 0.2,
 }
 
+TEMP_WEIGHTS = {
+    "ukmo_seamless": 0.4,
+    "ecmwf_ifs025": 0.4,
+    "gfs_seamless": 0.2,
+}
+
 # Confidence bands: (max spread for this band, label). Falls through to "Low".
 RAIN_CONF = [(0.3, "High"), (1.0, "Medium")]
 GUST_CONF = [(3.0, "High"), (7.0, "Medium")]
+TEMP_CONF = [(1.0, "High"), (3.0, "Medium")]  # °C spread across models
 
 TIMEZONE = "Europe/London"
 

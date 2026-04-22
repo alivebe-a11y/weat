@@ -45,6 +45,18 @@ CSV_HEADER = [
     "gust_blend_mph",
     "gust_spread_mph",
     "gust_confidence",
+    "temp_min_ukmo_c",
+    "temp_min_ecmwf_c",
+    "temp_min_gfs_c",
+    "temp_min_blend_c",
+    "temp_min_spread_c",
+    "temp_min_confidence",
+    "temp_max_ukmo_c",
+    "temp_max_ecmwf_c",
+    "temp_max_gfs_c",
+    "temp_max_blend_c",
+    "temp_max_spread_c",
+    "temp_max_confidence",
 ]
 
 # CSV column name suffix per model id.
@@ -110,7 +122,7 @@ def fetch_openmeteo(lat: float, lon: float) -> dict:
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": "precipitation,wind_gusts_10m",
+        "hourly": "precipitation,wind_gusts_10m,temperature_2m",
         "models": ",".join(config.MODELS),
         "wind_speed_unit": "mph",
         "forecast_days": 2,
@@ -143,11 +155,13 @@ def slice_shift(
     for model in config.MODELS:
         rain_key = f"precipitation_{model}"
         gust_key = f"wind_gusts_10m_{model}"
-        if rain_key not in hourly or gust_key not in hourly:
+        temp_key = f"temperature_2m_{model}"
+        if rain_key not in hourly or gust_key not in hourly or temp_key not in hourly:
             raise RuntimeError(f"Missing model data for {model}")
         rain_vals = [hourly[rain_key][i] for i in indices]
         gust_vals = [hourly[gust_key][i] for i in indices]
-        per_model[model] = {"rain": rain_vals, "gust": gust_vals}
+        temp_vals = [hourly[temp_key][i] for i in indices]
+        per_model[model] = {"rain": rain_vals, "gust": gust_vals, "temp": temp_vals}
 
     return [times[i] for i in indices], per_model
 
@@ -180,9 +194,13 @@ def build_row(
 ) -> dict:
     rain_totals = {m: round(sum(v["rain"]), 2) for m, v in per_model.items()}
     gust_maxes = {m: round(max(v["gust"]), 1) for m, v in per_model.items()}
+    temp_mins = {m: round(min(v["temp"]), 1) for m, v in per_model.items()}
+    temp_maxes = {m: round(max(v["temp"]), 1) for m, v in per_model.items()}
 
     rain_blend_val, rain_spread = blend(rain_totals, config.RAIN_WEIGHTS)
     gust_blend_val, gust_spread = blend(gust_maxes, config.GUST_WEIGHTS)
+    tmin_blend_val, tmin_spread = blend(temp_mins, config.TEMP_WEIGHTS)
+    tmax_blend_val, tmax_spread = blend(temp_maxes, config.TEMP_WEIGHTS)
 
     row = {
         "run_utc": datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -198,10 +216,18 @@ def build_row(
         "gust_blend_mph": round(gust_blend_val, 1),
         "gust_spread_mph": round(gust_spread, 1),
         "gust_confidence": confidence(gust_spread, config.GUST_CONF),
+        "temp_min_blend_c": round(tmin_blend_val, 1),
+        "temp_min_spread_c": round(tmin_spread, 1),
+        "temp_min_confidence": confidence(tmin_spread, config.TEMP_CONF),
+        "temp_max_blend_c": round(tmax_blend_val, 1),
+        "temp_max_spread_c": round(tmax_spread, 1),
+        "temp_max_confidence": confidence(tmax_spread, config.TEMP_CONF),
     }
     for model, short in MODEL_SHORT.items():
         row[f"rain_{short}_mm"] = rain_totals.get(model)
         row[f"gust_{short}_mph"] = gust_maxes.get(model)
+        row[f"temp_min_{short}_c"] = temp_mins.get(model)
+        row[f"temp_max_{short}_c"] = temp_maxes.get(model)
     return row
 
 
@@ -243,12 +269,16 @@ def main() -> int:
             row = build_row(loc, shift_name, shift_start, shift_end, per_model)
             append_row(row)
             log.info(
-                "%s: rain_blend=%.2fmm (%s) gust_blend=%.1fmph (%s)",
+                "%s: rain=%.2fmm (%s) gust=%.1fmph (%s) temp=%.1f..%.1f°C (%s/%s)",
                 loc["name"],
                 row["rain_blend_mm"],
                 row["rain_confidence"],
                 row["gust_blend_mph"],
                 row["gust_confidence"],
+                row["temp_min_blend_c"],
+                row["temp_max_blend_c"],
+                row["temp_min_confidence"],
+                row["temp_max_confidence"],
             )
         except Exception:
             log.exception("Failed for %s — skipping", loc["name"])
