@@ -36,16 +36,16 @@ TIMEZONE = "Europe/London"
 # to fetch for that shift.
 SHIFTS = {
     "day": {
-        "start": "05:00",
-        "end": "17:00",
-        "fetch_from": "04:00",
-        "fetch_to": "06:00",
+        "start": "04:30",
+        "end": "16:30",
+        "fetch_from": "03:30",
+        "fetch_to": "04:30",
     },
     "night": {
-        "start": "17:00",
-        "end": "05:00",
-        "fetch_from": "16:00",
-        "fetch_to": "18:00",
+        "start": "16:30",
+        "end": "04:30",
+        "fetch_from": "15:30",
+        "fetch_to": "16:30",
     },
 }
 
