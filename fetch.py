@@ -74,41 +74,48 @@ def parse_hhmm(s: str) -> time:
     return time(int(h), int(m))
 
 
-def within(now_t: time, start: time, end: time) -> bool:
-    """start inclusive, end exclusive, no wrap."""
-    return start <= now_t < end
+def shift_window(name: str, start_date: date, tz) -> tuple[datetime, datetime]:
+    """Build the (start, end) datetimes for a shift instance anchored to the
+    date the shift *starts* on. Handles windows that wrap past midnight."""
+    cfg = config.SHIFTS[name]
+    start = datetime.combine(start_date, parse_hhmm(cfg["start"]), tzinfo=tz)
+    end = datetime.combine(start_date, parse_hhmm(cfg["end"]), tzinfo=tz)
+    if parse_hhmm(cfg["end"]) <= parse_hhmm(cfg["start"]):  # wraps past midnight
+        end += timedelta(days=1)
+    return start, end
 
 
-def pick_shift(now_local: datetime) -> tuple[str, datetime, datetime] | None:
-    """Return (shift_name, start_local_dt, end_local_dt) if now is inside
-    a fetch window, else None. Honours FORCE_SHIFT env var."""
-    forced = os.environ.get("FORCE_SHIFT")
-    today = now_local.date()
+def pick_shift(now_local: datetime) -> tuple[str, datetime, datetime]:
+    """Return (shift_name, start_local_dt, end_local_dt) for the shift we
+    should currently be forecasting.
+
+    Normally this is the *next* shift to begin: we record the upcoming shift
+    at any point during the preceding ~12 hours, so a single run landing
+    anywhere in that long window is enough. Combined with the dedup check in
+    main(), dropped or delayed scheduled runs no longer lose a shift.
+
+    FORCE_SHIFT=day|night overrides the selection for manual/smoke runs and
+    targets today's instance of that shift.
+    """
     tz = now_local.tzinfo
-
-    def dt(d: date, hhmm: str) -> datetime:
-        return datetime.combine(d, parse_hhmm(hhmm), tzinfo=tz)
-
+    forced = os.environ.get("FORCE_SHIFT")
     if forced in config.SHIFTS:
-        cfg = config.SHIFTS[forced]
-        start = dt(today, cfg["start"])
-        end = dt(today, cfg["end"])
-        if cfg["end"] <= cfg["start"]:  # wraps past midnight
-            end += timedelta(days=1)
-        log.info("FORCE_SHIFT=%s overriding window check", forced)
+        log.info("FORCE_SHIFT=%s overriding shift selection", forced)
+        start, end = shift_window(forced, now_local.date(), tz)
         return forced, start, end
 
-    now_t = now_local.time()
-    for name, cfg in config.SHIFTS.items():
-        fetch_from = parse_hhmm(cfg["fetch_from"])
-        fetch_to = parse_hhmm(cfg["fetch_to"])
-        if within(now_t, fetch_from, fetch_to):
-            start = dt(today, cfg["start"])
-            end = dt(today, cfg["end"])
-            if cfg["end"] <= cfg["start"]:
-                end += timedelta(days=1)
-            return name, start, end
-    return None
+    # Among all upcoming shift starts (today and tomorrow), pick the soonest.
+    candidates: list[tuple[datetime, str, datetime]] = []
+    for name in config.SHIFTS:
+        for day_offset in (0, 1):
+            start, end = shift_window(
+                name, now_local.date() + timedelta(days=day_offset), tz
+            )
+            if start > now_local:
+                candidates.append((start, name, end))
+    candidates.sort(key=lambda c: c[0])
+    start, name, end = candidates[0]
+    return name, start, end
 
 
 def load_locations() -> list[dict]:
@@ -235,6 +242,22 @@ def build_row(
     return row
 
 
+def already_recorded(shift_name: str, shift_start_date: str) -> bool:
+    """True if data/forecast.csv already has a row for this shift instance,
+    so repeated runs within the long window don't duplicate it."""
+    path = Path(config.OUTPUT_FILE)
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    with path.open(newline="") as f:
+        for r in csv.DictReader(f):
+            if (
+                r.get("shift") == shift_name
+                and r.get("shift_start_date") == shift_start_date
+            ):
+                return True
+    return False
+
+
 def append_row(row: dict) -> None:
     path = Path(config.OUTPUT_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -251,21 +274,29 @@ def main() -> int:
     now_local = datetime.now(tz)
     log.info("Run at %s", now_local.isoformat(timespec="seconds"))
 
-    picked = pick_shift(now_local)
-    if picked is None:
-        log.info("Outside any fetch window — nothing to do.")
-        return 0
-    shift_name, shift_start, shift_end = picked
+    shift_name, shift_start, shift_end = pick_shift(now_local)
+    shift_start_date = shift_start.date().isoformat()
     log.info(
-        "Forecasting %s shift %s → %s",
+        "Target %s shift %s → %s",
         shift_name,
         shift_start.isoformat(timespec="minutes"),
         shift_end.isoformat(timespec="minutes"),
     )
 
+    if os.environ.get("FORCE_SHIFT") not in config.SHIFTS and already_recorded(
+        shift_name, shift_start_date
+    ):
+        log.info(
+            "%s shift starting %s already recorded — nothing to do.",
+            shift_name,
+            shift_start_date,
+        )
+        return 0
+
     locations = load_locations()
     log.info("Locations: %s", ", ".join(l["name"] for l in locations))
 
+    failures = 0
     for loc in locations:
         try:
             data = fetch_openmeteo(loc["lat"], loc["lon"])
@@ -285,8 +316,12 @@ def main() -> int:
                 row["temp_max_confidence"],
             )
         except Exception:
-            log.exception("Failed for %s — skipping", loc["name"])
+            failures += 1
+            log.exception("Failed for %s", loc["name"])
 
+    if failures:
+        log.error("%d of %d location(s) failed", failures, len(locations))
+        return 1
     return 0
 
 

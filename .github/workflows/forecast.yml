@@ -2,7 +2,10 @@ name: forecast
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Off-peak minutes (not :00) to dodge GitHub's top-of-hour high-load
+    # drops. With the per-shift dedup in fetch.py, every run within the ~12h
+    # lead-up to a shift is a fresh chance to record it.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       force_shift:
@@ -37,12 +40,13 @@ jobs:
 
       - name: Commit updated CSV
         run: |
-          if git diff --quiet data/forecast.csv; then
+          git add data/forecast.csv
+          if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/forecast.csv
           git commit -m "forecast: append run $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
