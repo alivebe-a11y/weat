@@ -242,31 +242,42 @@ def build_row(
     return row
 
 
-def already_recorded(shift_name: str, shift_start_date: str) -> bool:
-    """True if data/forecast.csv already has a row for this shift instance,
-    so repeated runs within the long window don't duplicate it."""
+def row_key(r: dict) -> tuple[str, str, str]:
+    """Identity of a shift forecast: one row per location per shift instance."""
+    return (str(r["location"]), str(r["shift"]), str(r["shift_start_date"]))
+
+
+def normalise(row: dict) -> dict:
+    """Project a built row onto CSV_HEADER as the strings csv will write,
+    so it compares equal to a row round-tripped through the file."""
+    out = {}
+    for k in CSV_HEADER:
+        v = row.get(k, "")
+        out[k] = "" if v is None else str(v)
+    return out
+
+
+def same_forecast(a: dict, b: dict) -> bool:
+    """Equal on every field except run_utc (the issue timestamp)."""
+    return all(a[k] == b[k] for k in CSV_HEADER if k != "run_utc")
+
+
+def load_rows() -> list[dict]:
     path = Path(config.OUTPUT_FILE)
     if not path.exists() or path.stat().st_size == 0:
-        return False
+        return []
     with path.open(newline="") as f:
-        for r in csv.DictReader(f):
-            if (
-                r.get("shift") == shift_name
-                and r.get("shift_start_date") == shift_start_date
-            ):
-                return True
-    return False
+        return [normalise(r) for r in csv.DictReader(f)]
 
 
-def append_row(row: dict) -> None:
+def write_rows(rows: list[dict]) -> None:
     path = Path(config.OUTPUT_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="") as f:
+    with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
-        if new_file:
-            writer.writeheader()
-        writer.writerow({k: row.get(k, "") for k in CSV_HEADER})
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({k: r.get(k, "") for k in CSV_HEADER})
 
 
 def main() -> int:
@@ -275,7 +286,6 @@ def main() -> int:
     log.info("Run at %s", now_local.isoformat(timespec="seconds"))
 
     shift_name, shift_start, shift_end = pick_shift(now_local)
-    shift_start_date = shift_start.date().isoformat()
     log.info(
         "Target %s shift %s → %s",
         shift_name,
@@ -283,29 +293,41 @@ def main() -> int:
         shift_end.isoformat(timespec="minutes"),
     )
 
-    if os.environ.get("FORCE_SHIFT") not in config.SHIFTS and already_recorded(
-        shift_name, shift_start_date
-    ):
-        log.info(
-            "%s shift starting %s already recorded — nothing to do.",
-            shift_name,
-            shift_start_date,
-        )
-        return 0
+    # pick_shift always targets the *next* shift to start, so we only ever
+    # touch the upcoming shift's row. The instant a shift begins, the target
+    # rolls to the following shift and the just-started row is frozen on the
+    # last forecast issued before it started — no explicit cutoff needed.
 
     locations = load_locations()
     log.info("Locations: %s", ", ".join(l["name"] for l in locations))
 
+    rows = load_rows()
+    index = {row_key(r): i for i, r in enumerate(rows)}
+
     failures = 0
+    changed = 0
     for loc in locations:
         try:
             data = fetch_openmeteo(loc["lat"], loc["lon"])
             _, per_model = slice_shift(data["hourly"], shift_start, shift_end)
-            row = build_row(loc, shift_name, shift_start, shift_end, per_model)
-            append_row(row)
+            row = normalise(build_row(loc, shift_name, shift_start, shift_end, per_model))
+            key = row_key(row)
+            existing_i = index.get(key)
+            if existing_i is None:
+                rows.append(row)
+                index[key] = len(rows) - 1
+                changed += 1
+                action = "added"
+            elif same_forecast(row, rows[existing_i]):
+                action = "unchanged"
+            else:
+                rows[existing_i] = row
+                changed += 1
+                action = "refreshed"
             log.info(
-                "%s: rain=%.2fmm (%s) gust=%.1fmph (%s) temp=%.1f..%.1f°C (%s/%s)",
+                "%s [%s]: rain=%smm (%s) gust=%smph (%s) temp=%s..%s°C (%s/%s)",
                 loc["name"],
+                action,
                 row["rain_blend_mm"],
                 row["rain_confidence"],
                 row["gust_blend_mph"],
@@ -318,6 +340,12 @@ def main() -> int:
         except Exception:
             failures += 1
             log.exception("Failed for %s", loc["name"])
+
+    if changed:
+        write_rows(rows)
+        log.info("Wrote %d updated row(s) to %s", changed, config.OUTPUT_FILE)
+    else:
+        log.info("No forecast changes — file untouched.")
 
     if failures:
         log.error("%d of %d location(s) failed", failures, len(locations))
