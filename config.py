@@ -52,3 +52,11 @@ SHIFTS = {
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 LOCATIONS_FILE = "locations.csv"
 OUTPUT_FILE = "data/forecast.csv"
+
+# --- Local verification stack (forecast accuracy vs ERA5 actuals) ---
+DB_FILE = "data/forecast.db"
+VERIFICATION_FILE = "data/verification.csv"
+# ERA5 reanalysis (the "actual weather" source) lags real time, so only
+# score shifts that ended at least this many days ago.
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+ACTUALS_DELAY_DAYS = 5
