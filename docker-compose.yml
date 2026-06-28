@@ -1,0 +1,14 @@
+services:
+  collector:
+    build: .
+    image: weat-collector
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/London
+    volumes:
+      # forecast.csv + forecast.db + verification.csv persist on the host here.
+      - ./data:/app/data
+
+  # Step 3 will add a `web` service (dashboard) here, sharing ./data read-only.

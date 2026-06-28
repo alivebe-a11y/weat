@@ -1,0 +1,4 @@
+# Container deps: the base collector plus the in-container scheduler/timezone.
+-r requirements.txt
+APScheduler==3.10.4
+tzdata>=2024.1

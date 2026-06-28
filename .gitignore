@@ -5,3 +5,6 @@ __pycache__/
 # Local verification stack state (forecast.csv stays tracked as the mirror)
 *.db
 data/verification.csv
+
+# Secrets / local container config
+.env
