@@ -208,8 +208,8 @@ def build_row(
 
     rain_blend_val, rain_spread = blend(rain_totals, config.RAIN_WEIGHTS)
     gust_blend_val, gust_spread = blend(gust_maxes, config.GUST_WEIGHTS)
-    tmin_blend_val, tmin_spread = blend(temp_mins, config.TEMP_WEIGHTS)
-    tmax_blend_val, tmax_spread = blend(temp_maxes, config.TEMP_WEIGHTS)
+    tmin_blend_val, tmin_spread = blend(temp_mins, config.TEMP_MIN_WEIGHTS)
+    tmax_blend_val, tmax_spread = blend(temp_maxes, config.TEMP_MAX_WEIGHTS)
 
     row = {
         "run_utc": datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"),

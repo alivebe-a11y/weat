@@ -129,7 +129,7 @@ def main() -> int:
     print(
         "\nWeights are inverse-MAE per variable. Treat as guidance until you have "
         "a few weeks of\nscored shifts - small samples are noisy. Map rain -> RAIN_WEIGHTS, "
-        "gust -> GUST_WEIGHTS,\ntemp_min/temp_max -> TEMP_WEIGHTS in config.py."
+        "gust -> GUST_WEIGHTS,\ntemp_min -> TEMP_MIN_WEIGHTS, temp_max -> TEMP_MAX_WEIGHTS in config.py."
     )
     return 0
 

@@ -6,22 +6,32 @@ no need to edit fetch.py.
 
 MODELS = ["ukmo_seamless", "ecmwf_ifs025", "gfs_seamless"]
 
+# Blend weights are inverse-MAE, derived from score.py over 98 scored shifts
+# (Holbury, Apr-Jun 2026 — summer only). Re-run score.py after more seasons of
+# data and update these; weights need not sum to 1 (blend() normalises).
 RAIN_WEIGHTS = {
-    "ukmo_seamless": 0.4,
-    "ecmwf_ifs025": 0.4,
-    "gfs_seamless": 0.2,
+    "ukmo_seamless": 0.37,
+    "ecmwf_ifs025": 0.29,
+    "gfs_seamless": 0.34,
 }
 
 GUST_WEIGHTS = {
-    "ukmo_seamless": 0.5,
-    "ecmwf_ifs025": 0.3,
-    "gfs_seamless": 0.2,
+    "ukmo_seamless": 0.31,
+    "ecmwf_ifs025": 0.45,  # ECMWF clearly best for gusts here
+    "gfs_seamless": 0.24,
 }
 
-TEMP_WEIGHTS = {
-    "ukmo_seamless": 0.4,
-    "ecmwf_ifs025": 0.4,
-    "gfs_seamless": 0.2,
+# Temp min and max rank the models differently, so they get separate weights.
+TEMP_MIN_WEIGHTS = {
+    "ukmo_seamless": 0.38,
+    "ecmwf_ifs025": 0.33,
+    "gfs_seamless": 0.29,
+}
+
+TEMP_MAX_WEIGHTS = {
+    "ukmo_seamless": 0.48,  # UKMO clearly best for daytime highs here
+    "ecmwf_ifs025": 0.23,
+    "gfs_seamless": 0.29,
 }
 
 # Confidence bands: (max spread for this band, label). Falls through to "Low".
