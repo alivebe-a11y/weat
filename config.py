@@ -70,3 +70,10 @@ VERIFICATION_FILE = "data/verification.csv"
 # score shifts that ended at least this many days ago.
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 ACTUALS_DELAY_DAYS = 5
+
+# Bias correction. score.py learns per-variable offsets into BIAS_FILE.
+# APPLY_BIAS_CORRECTION is OFF by default so forecast.csv is unchanged; flip to
+# True to fold the offsets into the blend written to the CSV.
+BIAS_FILE = "data/bias.json"
+APPLY_BIAS_CORRECTION = False
+BIAS_MIN_SAMPLES = 20

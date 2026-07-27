@@ -9,6 +9,7 @@ import csv
 import logging
 import sys
 
+import bias
 import config
 import store
 
@@ -36,6 +37,8 @@ VERIFICATION_HEADER = [
     "ukmo_error",
     "ecmwf_error",
     "gfs_error",
+    "blend_corrected",
+    "blend_corrected_error",
 ]
 
 
@@ -61,6 +64,8 @@ def main() -> int:
     out_rows = []
     # abs-error accumulators: errors[variable]["blend"|model] = [abs errors]
     errors = {v: {"blend": [], **{m: [] for m in MODELS_SHORT}} for v in VARIABLES}
+    # signed (forecast, actual) pairs per blend column, for learning bias offsets
+    pairs = {bcol: [] for _, bcol, _ in VARIABLES.values()}
 
     for a in actuals:
         key = (a["location"], a["shift"], a["shift_start_date"])
@@ -74,6 +79,7 @@ def main() -> int:
                 continue
             blend_err = round(blend - actual, 2)
             errors[var]["blend"].append(abs(blend_err))
+            pairs[bcol].append((blend, actual))
             row = {
                 "location": a["location"],
                 "shift": a["shift"],
@@ -82,6 +88,7 @@ def main() -> int:
                 "actual": actual,
                 "blend_forecast": blend,
                 "blend_error": blend_err,
+                "_bcol": bcol,  # internal, dropped before writing
             }
             for m in MODELS_SHORT:
                 mv = f(fc[mtmpl.format(m)])
@@ -90,6 +97,20 @@ def main() -> int:
                 if err is not None:
                     errors[var][m].append(abs(err))
             out_rows.append(row)
+
+    # Learn bias offsets and record a corrected forecast/error on each row.
+    offsets = bias.compute(pairs, config.BIAS_MIN_SAMPLES)
+    bias.save(offsets)
+    bcol_to_var = {bcol: v for v, (_, bcol, _) in VARIABLES.items()}
+    corrected_ae = {v: [] for v in VARIABLES}
+    for row in out_rows:
+        bcol = row.pop("_bcol")
+        off = offsets.get(bcol, 0.0)
+        corrected = round(row["blend_forecast"] + off, 2)
+        cerr = round(corrected - row["actual"], 2)
+        row["blend_corrected"] = corrected
+        row["blend_corrected_error"] = cerr
+        corrected_ae[bcol_to_var[bcol]].append(abs(cerr))
 
     with open(config.VERIFICATION_FILE, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=VERIFICATION_HEADER)
@@ -130,6 +151,24 @@ def main() -> int:
         "\nWeights are inverse-MAE per variable. Treat as guidance until you have "
         "a few weeks of\nscored shifts - small samples are noisy. Map rain -> RAIN_WEIGHTS, "
         "gust -> GUST_WEIGHTS,\ntemp_min -> TEMP_MIN_WEIGHTS, temp_max -> TEMP_MAX_WEIGHTS in config.py."
+    )
+
+    print("\nBias correction (learned offset = add to forecast to centre on reality):")
+    print(f"{'variable':9} {'offset':>8} {'MAE now':>9} {'MAE corrected':>14}")
+    print("-" * 44)
+    for var, (_, bcol, _) in VARIABLES.items():
+        off = offsets.get(bcol, 0.0)
+        raw = mae(errors[var]["blend"])
+        cor = mae(corrected_ae[var])
+
+        def s(x):
+            return f"{x:9.2f}" if x is not None else f"{'--':>9}"
+
+        print(f"{var:9} {off:>+8.2f} {s(raw)} {'':4}{s(cor)}")
+    print(
+        f"\nOffsets saved to {config.BIAS_FILE}. forecast.csv is UNCHANGED "
+        "(APPLY_BIAS_CORRECTION\nis False). Set it True in config.py to fold these "
+        "into the CSV blend."
     )
     return 0
 

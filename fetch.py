@@ -211,6 +211,18 @@ def build_row(
     tmin_blend_val, tmin_spread = blend(temp_mins, config.TEMP_MIN_WEIGHTS)
     tmax_blend_val, tmax_spread = blend(temp_maxes, config.TEMP_MAX_WEIGHTS)
 
+    # Bias correction is off by default (config.APPLY_BIAS_CORRECTION), so this
+    # is a no-op and forecast.csv is unchanged. When enabled, shift each blend
+    # by its learned offset; spread/confidence are left untouched.
+    if config.APPLY_BIAS_CORRECTION:
+        import bias
+
+        off = bias.load()
+        rain_blend_val += off.get("rain_blend_mm", 0.0)
+        gust_blend_val += off.get("gust_blend_mph", 0.0)
+        tmin_blend_val += off.get("temp_min_blend_c", 0.0)
+        tmax_blend_val += off.get("temp_max_blend_c", 0.0)
+
     row = {
         "run_utc": datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "location": loc["name"],
